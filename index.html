@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>気象情報マップアプリケーション</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    :root {
+      --bg: #f4efe7;
+      --panel: #fff7ed;
+      --ink: #1f1b16;
+      --accent: #d97706;
+      --accent-2: #0f766e;
+      --border: #e6d5bf;
+      --muted: #6b5b4a;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at top left, #fff0d6 0%, #f4efe7 45%, #efe4d4 100%);
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 20px 28px 12px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0.08em;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) 1fr minmax(260px, 360px);
+      grid-template-rows: auto auto;
+      grid-template-areas:
+        "location map current"
+        "forecast forecast forecast";
+      gap: 16px;
+      padding: 0 24px 24px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 10px 25px rgba(31, 27, 22, 0.08);
+    }
+
+    #map {
+      height: 520px;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    .location-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      grid-area: location;
+    }
+
+    .label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+    }
+
+    .value {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .current-panel {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      grid-area: current;
+    }
+
+    .metric {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .metric .value {
+      font-size: 20px;
+    }
+
+    .forecast-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      grid-area: forecast;
+    }
+
+    .heatmap {
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 2px;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .heatmap-cell {
+      height: 22px;
+      font-size: 10px;
+      color: #4c2a1a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .heatmap-labels {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 4px;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend-bar {
+      flex: 1;
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #fef3c7, #fdba74, #f97316, #ea580c, #c2410c);
+    }
+
+    .status {
+      font-size: 13px;
+      color: var(--accent-2);
+      font-weight: 600;
+    }
+
+    @media (max-width: 1024px) {
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+        grid-template-areas:
+          "location"
+          "map"
+          "current"
+          "forecast";
+      }
+
+      .current-panel {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      #map {
+        height: 420px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>気象情報マップアプリケーション</h1>
+  </header>
+  <main>
+    <section class="panel location-panel">
+      <div>
+        <div class="label">クリック位置</div>
+        <div id="coords" class="value">未選択</div>
+      </div>
+      <div>
+        <div class="label">場所</div>
+        <div id="place" class="value">-</div>
+        <div id="place-extra" class="muted">地図をクリックしてください。</div>
+      </div>
+      <div>
+        <div class="label">現地時刻</div>
+        <div id="local-time" class="value">-</div>
+      </div>
+      <div class="status" id="status">待機中</div>
+    </section>
+
+    <section class="panel">
+      <div id="map"></div>
+    </section>
+
+    <section class="panel current-panel">
+      <div class="metric">
+        <div class="label">現在の天気</div>
+        <div id="current-summary" class="value">-</div>
+        <div id="current-time" class="muted">-</div>
+      </div>
+      <div class="metric">
+        <div class="label">気温</div>
+        <div id="current-temp" class="value">-</div>
+        <div id="current-wind" class="muted">-</div>
+      </div>
+      <div class="metric">
+        <div class="label">降水量</div>
+        <div id="current-precip" class="value">-</div>
+        <div id="current-precip-note" class="muted">-</div>
+      </div>
+    </section>
+
+    <section class="panel forecast-panel">
+      <div>
+        <div class="label">24時間予報</div>
+        <div class="muted">温度 / 降水量 / 風速のヒートマップ</div>
+      </div>
+
+      <div>
+        <div class="label">気温 (°C)</div>
+        <div id="heat-temp" class="heatmap"></div>
+        <div id="heat-temp-labels" class="heatmap-labels"></div>
+      </div>
+
+      <div>
+        <div class="label">降水量 (mm)</div>
+        <div id="heat-precip" class="heatmap"></div>
+        <div id="heat-precip-labels" class="heatmap-labels"></div>
+      </div>
+
+      <div>
+        <div class="label">風速 (m/s)</div>
+        <div id="heat-wind" class="heatmap"></div>
+        <div id="heat-wind-labels" class="heatmap-labels"></div>
+      </div>
+
+      <div class="legend">
+        <span>弱</span>
+        <div class="legend-bar"></div>
+        <span>強</span>
+      </div>
+    </section>
+  </main>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script>
+    const map = L.map("map", { zoomControl: true }).setView([35.681236, 139.767125], 5);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 18,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+
+    let marker = null;
+    let requestCounter = 0;
+    let lastPlaceFetch = 0;
+
+    const statusEl = document.getElementById("status");
+    const coordsEl = document.getElementById("coords");
+    const placeEl = document.getElementById("place");
+    const placeExtraEl = document.getElementById("place-extra");
+    const localTimeEl = document.getElementById("local-time");
+
+    const currentSummaryEl = document.getElementById("current-summary");
+    const currentTimeEl = document.getElementById("current-time");
+    const currentTempEl = document.getElementById("current-temp");
+    const currentWindEl = document.getElementById("current-wind");
+    const currentPrecipEl = document.getElementById("current-precip");
+    const currentPrecipNoteEl = document.getElementById("current-precip-note");
+
+    const heatTempEl = document.getElementById("heat-temp");
+    const heatTempLabelsEl = document.getElementById("heat-temp-labels");
+    const heatPrecipEl = document.getElementById("heat-precip");
+    const heatPrecipLabelsEl = document.getElementById("heat-precip-labels");
+    const heatWindEl = document.getElementById("heat-wind");
+    const heatWindLabelsEl = document.getElementById("heat-wind-labels");
+
+    const weatherCodeMap = {
+      0: "快晴",
+      1: "ほぼ快晴",
+      2: "一部曇り",
+      3: "曇り",
+      45: "霧",
+      48: "着氷性の霧",
+      51: "霧雨(弱)",
+      53: "霧雨(中)",
+      55: "霧雨(強)",
+      61: "雨(弱)",
+      63: "雨(中)",
+      65: "雨(強)",
+      71: "雪(弱)",
+      73: "雪(中)",
+      75: "雪(強)",
+      80: "にわか雨(弱)",
+      81: "にわか雨(中)",
+      82: "にわか雨(強)",
+      95: "雷雨",
+    };
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function normalizeLng(lng) {
+      return ((lng + 180) % 360 + 360) % 360 - 180;
+    }
+
+    function clampLat(lat) {
+      return Math.max(-90, Math.min(90, lat));
+    }
+
+    function formatCoord(value) {
+      return value.toFixed(4);
+    }
+
+    function getHeatColor(value, min, max) {
+      const ratio = max === min ? 0.5 : (value - min) / (max - min);
+      const stops = [
+        { t: 0, c: [254, 243, 199] },
+        { t: 0.25, c: [253, 186, 116] },
+        { t: 0.5, c: [249, 115, 22] },
+        { t: 0.75, c: [234, 88, 12] },
+        { t: 1, c: [194, 65, 12] },
+      ];
+
+      for (let i = 0; i < stops.length - 1; i++) {
+        const a = stops[i];
+        const b = stops[i + 1];
+        if (ratio >= a.t && ratio <= b.t) {
+          const local = (ratio - a.t) / (b.t - a.t);
+          const r = Math.round(a.c[0] + (b.c[0] - a.c[0]) * local);
+          const g = Math.round(a.c[1] + (b.c[1] - a.c[1]) * local);
+          const bVal = Math.round(a.c[2] + (b.c[2] - a.c[2]) * local);
+          return `rgb(${r}, ${g}, ${bVal})`;
+        }
+      }
+      return "rgb(254, 243, 199)";
+    }
+
+    function renderHeatmap(container, labelsContainer, values, labelTimes, decimals = 0) {
+      container.innerHTML = "";
+      labelsContainer.innerHTML = "";
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+
+      values.forEach((value) => {
+        const cell = document.createElement("div");
+        cell.className = "heatmap-cell";
+        cell.style.background = getHeatColor(value, min, max);
+        const text = value.toFixed(decimals);
+        cell.textContent = text;
+        cell.title = text;
+        container.appendChild(cell);
+      });
+
+      const labelStep = Math.max(1, Math.floor(labelTimes.length / 6));
+      for (let i = 0; i < labelTimes.length; i += labelStep) {
+        const label = document.createElement("div");
+        label.textContent = labelTimes[i];
+        labelsContainer.appendChild(label);
+      }
+    }
+
+    function extract24Hours(hourly, startIndex) {
+      const end = Math.min(startIndex + 24, hourly.time.length);
+      return {
+        time: hourly.time.slice(startIndex, end),
+        temperature: hourly.temperature_2m.slice(startIndex, end),
+        precipitation: hourly.precipitation.slice(startIndex, end),
+        wind: hourly.wind_speed_10m.slice(startIndex, end),
+      };
+    }
+
+    async function fetchWeather(lat, lon) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        throw new Error("位置情報が不正です");
+      }
+      const safeLat = clampLat(lat);
+      const safeLon = normalizeLng(lon);
+      const params = new URLSearchParams({
+        latitude: safeLat.toFixed(5),
+        longitude: safeLon.toFixed(5),
+        current_weather: "true",
+        hourly: "temperature_2m,precipitation,wind_speed_10m",
+        timezone: "auto",
+      });
+      const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        const detail = await response.text();
+        console.warn("Open-Meteo request failed:", url, detail);
+        throw new Error("天気データの取得に失敗しました");
+      }
+      return response.json();
+    }
+
+    async function fetchPlace(lat, lon) {
+      const now = Date.now();
+      const wait = Math.max(0, 1100 - (now - lastPlaceFetch));
+      if (wait > 0) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+      lastPlaceFetch = Date.now();
+
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=ja`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error("住所情報の取得に失敗しました");
+      }
+      return response.json();
+    }
+
+    function formatLocalTime(timezone) {
+      return new Intl.DateTimeFormat("ja-JP", {
+        timeZone: timezone,
+        dateStyle: "full",
+        timeStyle: "short",
+      }).format(new Date());
+    }
+
+    function updateCurrent(weather) {
+      const current = weather.current || weather.current_weather;
+      if (!current) {
+        throw new Error("現在の天気データが取得できません");
+      }
+      const isNewSchema = "temperature_2m" in current;
+      const summary = weatherCodeMap[current.weather_code ?? current.weathercode] || "不明";
+      let precipValue = 0;
+
+      if (weather.hourly && weather.hourly.time) {
+        const idx = weather.hourly.time.indexOf(current.time);
+        if (idx >= 0) {
+          precipValue = weather.hourly.precipitation[idx];
+        }
+      }
+
+      currentSummaryEl.textContent = summary;
+      currentTimeEl.textContent = `観測時刻: ${current.time}`;
+      currentTempEl.textContent = `${(isNewSchema ? current.temperature_2m : current.temperature).toFixed(1)}°C`;
+      currentWindEl.textContent = `風速 ${(isNewSchema ? current.wind_speed_10m : current.windspeed).toFixed(1)} m/s`;
+      currentPrecipEl.textContent = `${precipValue.toFixed(1)} mm`;
+      currentPrecipNoteEl.textContent = "次の1時間の降水量予報";
+    }
+
+    function formatHourLabel(timeText) {
+      const parts = timeText.split("T");
+      if (parts.length < 2) {
+        return timeText;
+      }
+      const hour = parts[1].slice(0, 2);
+      return `${hour}時`;
+    }
+
+    function updateHeatmaps(weather) {
+      const hourly = weather.hourly;
+      if (!hourly || !hourly.time) {
+        throw new Error("予報データが取得できません");
+      }
+      const currentTime = weather.current?.time || weather.current_weather?.time || "";
+      let startIndex = hourly.time.findIndex((t) => t >= currentTime);
+      if (startIndex < 0) {
+        startIndex = 0;
+      }
+
+      const slice = extract24Hours(hourly, startIndex);
+      const labels = slice.time.map((t) => formatHourLabel(t));
+
+      renderHeatmap(heatTempEl, heatTempLabelsEl, slice.temperature, labels, 1);
+      renderHeatmap(heatPrecipEl, heatPrecipLabelsEl, slice.precipitation, labels, 1);
+      renderHeatmap(heatWindEl, heatWindLabelsEl, slice.wind, labels, 1);
+    }
+
+    function updateLocation(place, lat, lon, timezone) {
+      const safeLat = clampLat(lat);
+      const safeLon = normalizeLng(lon);
+      coordsEl.textContent = `${formatCoord(safeLat)}, ${formatCoord(safeLon)}`;
+      if (place) {
+        placeEl.textContent = place.display_name || "-";
+        placeExtraEl.textContent = place.address?.city || place.address?.town || place.address?.village || place.address?.state || "";
+      } else {
+        placeEl.textContent = "取得できませんでした";
+        placeExtraEl.textContent = "住所情報の取得に失敗しました";
+      }
+      localTimeEl.textContent = timezone ? formatLocalTime(timezone) : "-";
+    }
+
+    async function handleMapClick(event) {
+      const { lat, lng } = event.latlng;
+      const safeLat = clampLat(lat);
+      const safeLon = normalizeLng(lng);
+      const requestId = ++requestCounter;
+      if (marker) {
+        marker.setLatLng([safeLat, safeLon]);
+      } else {
+        marker = L.marker([safeLat, safeLon]).addTo(map);
+      }
+
+      setStatus("データ取得中...");
+
+      try {
+        const weather = await fetchWeather(safeLat, safeLon);
+        if (requestId !== requestCounter) {
+          return;
+        }
+
+        updateLocation(null, safeLat, safeLon, weather.timezone);
+        updateCurrent(weather);
+        updateHeatmaps(weather);
+
+        let place = null;
+        try {
+          place = await fetchPlace(safeLat, safeLon);
+        } catch (placeError) {
+          console.warn(placeError);
+        }
+
+        if (requestId !== requestCounter) {
+          return;
+        }
+        updateLocation(place, safeLat, safeLon, weather.timezone);
+        setStatus(place ? "更新完了" : "天気更新 (住所取得失敗)");
+      } catch (error) {
+        setStatus("取得エラー: もう一度お試しください");
+        console.error(error);
+      }
+    }
+
+    map.on("click", handleMapClick);
+  </script>
+</body>
+</html>
